@@ -14,6 +14,12 @@ import sys
 
 from gi.repository import GLib, Gio
 
+TOKEN_DIR = os.path.join(
+    os.environ.get('XDG_DATA_HOME', os.path.expanduser('~/.local/share')),
+    'rustdesk-wayland',
+)
+TOKEN_FILE = os.path.join(TOKEN_DIR, 'restore_token')
+
 bus = Gio.bus_get_sync(Gio.BusType.SESSION)
 unique_name = bus.get_unique_name()
 sender = unique_name.lstrip(':').replace('.', '_')
@@ -24,7 +30,25 @@ session_path = f"/org/freedesktop/portal/desktop/session/{sender}/{token}"
 loop = GLib.MainLoop()
 node_id = None
 gst_proc = None
+restore_token = None
 print_only = '--print-only' in sys.argv
+
+
+def load_restore_token():
+    try:
+        with open(TOKEN_FILE) as f:
+            t = f.read().strip()
+            if t:
+                return t
+    except FileNotFoundError:
+        pass
+    return None
+
+
+def save_restore_token(t):
+    os.makedirs(TOKEN_DIR, exist_ok=True)
+    with open(TOKEN_FILE, 'w') as f:
+        f.write(t)
 
 
 def cleanup(*args):
@@ -70,6 +94,10 @@ def on_response(connection, sender_name, object_path, interface_name, signal_nam
             node_id = streams[0][0]
             print(f"PipeWire node ID: {node_id}", file=sys.stderr)
             print(node_id, flush=True)
+            # Save restore_token for future sessions (avoids the share dialog)
+            if 'restore_token' in results and results['restore_token']:
+                save_restore_token(results['restore_token'])
+                print("Saved restore token for future sessions.", file=sys.stderr)
             if not print_only:
                 launch_gstreamer(node_id)
                 print("Pipeline running. Keeping session alive (Ctrl+C to stop).", file=sys.stderr)
@@ -98,22 +126,25 @@ def create_session():
 
 
 def select_sources():
+    opts = {
+        'types': GLib.Variant('u', 1),
+        'multiple': GLib.Variant('b', False),
+        'handle_token': GLib.Variant('s', f'{token}_ss'),
+        'persist_mode': GLib.Variant('u', 2),  # persist until explicitly revoked
+    }
+    if restore_token:
+        opts['restore_token'] = GLib.Variant('s', restore_token)
+        print(f"Using saved restore token (no dialog expected).", file=sys.stderr)
+    else:
+        print(">>> Select your monitor in the dialog and click Share <<<", file=sys.stderr)
     bus.call_sync(
         'org.freedesktop.portal.Desktop',
         '/org/freedesktop/portal/desktop',
         'org.freedesktop.portal.ScreenCast',
         'SelectSources',
-        GLib.Variant('(oa{sv})', (
-            session_path,
-            {
-                'types': GLib.Variant('u', 1),
-                'multiple': GLib.Variant('b', False),
-                'handle_token': GLib.Variant('s', f'{token}_ss'),
-            },
-        )),
+        GLib.Variant('(oa{sv})', (session_path, opts)),
         None, Gio.DBusCallFlags.NONE, -1, None,
     )
-    print(">>> Select your monitor in the dialog and click Share <<<", file=sys.stderr)
 
 
 def start_screencast():
@@ -152,6 +183,7 @@ bus.signal_subscribe(
 if not print_only:
     GLib.timeout_add_seconds(2, check_gst)
 
+restore_token = load_restore_token()
 print("Creating screencast session...", file=sys.stderr)
 create_session()
 

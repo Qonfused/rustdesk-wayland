@@ -67,8 +67,11 @@ You need these installed:
 make
 make install
 
-# hooks up ld.so.preload and swaps in the fake libxdo (needs sudo)
+# Deploy udev rule and add user to input group (one-time, needs sudo)
 rustdesk-wayland.sh install
+
+# Log out and back in so the input group membership takes effect
+# (Or you can use: newgrp input)
 ```
 
 ## Usage
@@ -81,12 +84,17 @@ rustdesk-wayland.sh uninstall  # undoes the install step
 
 Set `RUSTDESK_SCREEN_RES` if your monitor isn't 2560x1080 (e.g., `RUSTDESK_SCREEN_RES=1920x1080x24`).
 
+### Autostart
+
+Once installed, RustDesk will automatically launch the full workaround (including screen capture) on login via `~/.config/autostart/rustdesk-service.desktop`. The autostart wrapper calls `rustdesk-wayland.sh start` in the background after a 5-second delay to let the desktop session stabilize.
+
 ## Known issues
 
-- You get a screen share dialog every time you run `start`. There is unfortunately no way around this as the portal requires consent.
-- `portal-screencast.py` has to keep running. If it dies, the screen goes black.
-- `/dev/uinput` gets `chmod 666` which is lazy; it's possible that a udev rule would be better.
-- Screen dimensions are hardcoded in `libxdo_wrapper.c` (`SCREEN_W`/`SCREEN_H`). You can edit them if yours differ.
+- **Screen share dialog:** The first time you run `start` after install, you'll get a COSMIC screen share consent dialog. Click "Share" to proceed. The permission is saved in `~/.local/share/rustdesk-wayland/restore_token` and reused on subsequent runs — no more dialogs (unless the token expires or is revoked).
+- **`portal-screencast.py` must stay running.** If it dies, the screen goes black. The autostart wrapper ensures it starts on login.
+- **Input group membership:** After `make install && rustdesk-wayland.sh install`, you must log out and back in (or `newgrp input`) for the `input` group to take effect. Without it, `/dev/uinput` is inaccessible and mouse/keyboard won't work. The udev rule (`/etc/udev/rules.d/99-uinput.rules`) handles permissions permanently.
+- **RustDesk client keyboard setting:** Some RustDesk clients (observed on macOS) have a "Block keyboard input" option in their remote settings. Verify this is **unchecked** on the client side, otherwise keyboard input will be ignored even if the workaround is working.
+- **Screen dimensions:** Hardcoded in `libxdo_wrapper.c` (`SCREEN_W`/`SCREEN_H`). Edit them if your monitor differs from 2560×1080. Use `RUSTDESK_SCREEN_RES=WIDTHxHEIGHTx24` when running `start` to match.
 
 ## Tested with
 

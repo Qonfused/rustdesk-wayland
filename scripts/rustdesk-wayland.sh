@@ -48,8 +48,21 @@ case "${1:-help}" in
         sudo cp "$XDO_WRAPPER" /usr/lib/libxdo.so.4
         sudo ldconfig 2>/dev/null || true
 
-        # Ensure /dev/uinput is accessible
-        sudo chmod 666 /dev/uinput
+        # Install udev rule for /dev/uinput (replaces chmod 666)
+        UDEV_RULE="${LIBDIR}/rustdesk-wayland/99-uinput.rules"
+        if [ -f "$UDEV_RULE" ]; then
+            echo "Installing udev rule for /dev/uinput..."
+            sudo cp "$UDEV_RULE" /etc/udev/rules.d/99-uinput.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger /dev/uinput 2>/dev/null || true
+        fi
+
+        # Add user to input group for uinput access
+        if ! id -nG | grep -qw input; then
+            echo "Adding $(whoami) to input group..."
+            sudo usermod -aG input "$(whoami)"
+            echo "NOTE: Log out and back in for group change to take effect."
+        fi
 
         echo ""
         echo "Installed. Run '$0 start' to launch."
@@ -57,19 +70,20 @@ case "${1:-help}" in
 
     start)
         echo "=== Starting RustDesk Wayland Setup ==="
-        sudo -v
 
         # Stop existing instances
-        sudo pkill -f 'rustdesk --service' 2>/dev/null || true
+        pkill -f 'rustdesk --service' 2>/dev/null || true
         pkill -f 'rustdesk --server' 2>/dev/null || true
         pkill -f 'portal-screencast.py' 2>/dev/null || true
         pkill -f 'gst-launch.*pipewiresrc' 2>/dev/null || true
         pkill -f 'Xvfb :99' 2>/dev/null || true
-        sudo rm -f /tmp/RustDesk/ipc_uinput_* 2>/dev/null || true
+        rm -f /tmp/RustDesk/ipc_uinput_* 2>/dev/null || true
         sleep 2
 
-        # Ensure /dev/uinput is accessible
-        sudo chmod 666 /dev/uinput
+        # Verify /dev/uinput is accessible (udev rule should handle this)
+        if [ ! -w /dev/uinput ]; then
+            echo "WARNING: /dev/uinput is not writable. Run '$0 install' first."
+        fi
 
         # Start virtual X11 display for screen capture
         echo "Starting Xvfb on :99 (${SCREEN_RES})..."
@@ -78,7 +92,6 @@ case "${1:-help}" in
 
         # Launch portal screencast → GStreamer → Xvfb
         echo "Requesting screen share via portal..."
-        echo ">>> A dialog will appear — select your monitor and click Share <<<"
         DISPLAY=:99 nohup /usr/bin/python3 "${BINDIR}/portal-screencast.py" \
             > /tmp/portal-screencast.log 2>&1 &
 
@@ -97,9 +110,9 @@ case "${1:-help}" in
 
         echo "Screencast pipeline running."
 
-        # Start RustDesk service as root
+        # Start RustDesk service
         echo "Starting RustDesk service..."
-        sudo nohup /usr/share/rustdesk/rustdesk --service > /dev/null 2>&1 &
+        nohup /usr/share/rustdesk/rustdesk --service > /dev/null 2>&1 &
         sleep 2
 
         echo ""
@@ -108,7 +121,7 @@ case "${1:-help}" in
 
     stop)
         echo "=== Stopping RustDesk Wayland Setup ==="
-        sudo pkill -f 'rustdesk --service' 2>/dev/null || true
+        pkill -f 'rustdesk --service' 2>/dev/null || true
         pkill -f 'rustdesk --server' 2>/dev/null || true
         pkill -f 'portal-screencast.py' 2>/dev/null || true
         pkill -f 'gst-launch.*pipewiresrc' 2>/dev/null || true
@@ -132,6 +145,13 @@ case "${1:-help}" in
             echo "Restoring original libxdo.so.4..."
             sudo mv /usr/lib/libxdo.so.4.real /usr/lib/libxdo.so.4
             sudo ldconfig 2>/dev/null || true
+        fi
+
+        # Remove udev rule
+        if [ -f /etc/udev/rules.d/99-uinput.rules ]; then
+            echo "Removing udev rule..."
+            sudo rm -f /etc/udev/rules.d/99-uinput.rules
+            sudo udevadm control --reload-rules
         fi
 
         echo "Uninstalled. Run '$0 stop' to stop running services."
