@@ -18,9 +18,10 @@ The workaround has three parts, one for each broken thing:
 
 | What's broken | Fix |
 |---|---|
-| Screen capture | A Python script asks COSMIC for a PipeWire screencast, pipes it through GStreamer into Xvfb :99. An `ld.so.preload` shim lies to RustDesk about `DISPLAY` being `:99`. |
+| Screen capture | A Python script asks COSMIC for a PipeWire screencast, pipes it through GStreamer into Xvfb :98. An `ld.so.preload` shim lies to RustDesk about `DISPLAY` being `:98`. |
 | Mouse | A fake `libxdo.so.4` replaces the real one. For RustDesk processes, it writes mouse events to `/dev/uinput` instead of X11. |
 | Keyboard | The `ld.so.preload` shim also intercepts `XTestFakeKeyEvent` calls, converts the X11 keycodes to evdev, and writes them to `/dev/uinput`. |
+| Helper GUI windows | RustDesk's `--tray` and `--cm` helper processes are pointed at a hidden Xvfb `:97` so their windows do not flash into the real Wayland session or disturb tiling. |
 
 The uinput devices show up as real input hardware, so the Wayland compositor picks them up normally.
 
@@ -28,9 +29,9 @@ The uinput devices show up as real input hardware, so the Wayland compositor pic
 Remote client
     │
     ▼
-RustDesk --server (thinks DISPLAY=:99)
+RustDesk --server (thinks DISPLAY=:98)
     │
-    ├── Screen capture ──► reads from Xvfb :99
+    ├── Screen capture ──► reads from Xvfb :98
     │                           ▲
     │                      GStreamer pipewiresrc → ximagesink
     │                           ▲
@@ -49,6 +50,7 @@ RustDesk --server (thinks DISPLAY=:99)
 - `src/libxdo_wrapper.c` — replaces `libxdo.so.4`. For RustDesk, mouse events go through uinput. For everything else, it forwards to the real libxdo.
 - `scripts/portal-screencast.py` — asks xdg-desktop-portal for a screencast and renders it into Xvfb with GStreamer. Has to stay running or the PipeWire session dies.
 - `scripts/rustdesk-wayland.sh` — does the actual setup/teardown.
+- `scripts/rustdesk-service-wrapper.sh` — login autostart wrapper that waits briefly, then runs `rustdesk-wayland.sh start`.
 
 ## Prerequisites
 
@@ -74,6 +76,13 @@ rustdesk-wayland.sh install
 # (Or you can use: newgrp input)
 ```
 
+The setup command copies the preload shim into `/usr/local/lib/rustdesk-wayland`
+before adding it to `/etc/ld.so.preload`, installs the udev rule, replaces
+`libxdo.so.4`, and creates `~/.config/autostart/rustdesk-service.desktop`.
+Do not point `/etc/ld.so.preload` at a file under `~/.local/lib`; system startup
+jobs running as other users may be unable to read through your home directory
+and will print loader errors.
+
 ## Usage
 
 ```bash
@@ -82,7 +91,9 @@ rustdesk-wayland.sh stop       # kills everything
 rustdesk-wayland.sh uninstall  # undoes the install step
 ```
 
-Set `RUSTDESK_SCREEN_RES` if your monitor isn't 2560x1080 (e.g., `RUSTDESK_SCREEN_RES=1920x1080x24`).
+Set `RUSTDESK_SCREEN_RES` if your monitor isn't 2560x1080 (e.g., `RUSTDESK_SCREEN_RES=1920x1080x24`). The virtual capture display defaults to `:98` so it does not collide with MTGOBot's `:99` Xvfb; override it with `RUSTDESK_VIRTUAL_DISPLAY` only if needed.
+RustDesk helper GUI windows default to a separate hidden `:97` display; override
+that with `RUSTDESK_GUI_DISPLAY` only if needed.
 
 ### Autostart
 

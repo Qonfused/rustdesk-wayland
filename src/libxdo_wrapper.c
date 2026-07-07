@@ -90,8 +90,11 @@ static int create_mouse_device(void) {
   ioctl(fd, UI_SET_ABSBIT, ABS_X);
   ioctl(fd, UI_SET_ABSBIT, ABS_Y);
   ioctl(fd, UI_SET_EVBIT, EV_REL);
+  ioctl(fd, UI_SET_RELBIT, REL_X);
+  ioctl(fd, UI_SET_RELBIT, REL_Y);
   ioctl(fd, UI_SET_RELBIT, REL_WHEEL);
   ioctl(fd, UI_SET_RELBIT, REL_HWHEEL);
+  ioctl(fd, UI_SET_PROPBIT, INPUT_PROP_POINTER);
 
   struct uinput_abs_setup abs_x = {0};
   abs_x.code = ABS_X;

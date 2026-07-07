@@ -23,6 +23,7 @@ install: all
 	install -Dm755 build/libxdo_wrapper.so $(LIBDIR)/libxdo_wrapper.so
 	install -Dm755 scripts/portal-screencast.py $(BINDIR)/portal-screencast.py
 	install -Dm755 scripts/rustdesk-wayland.sh $(BINDIR)/rustdesk-wayland.sh
+	install -Dm755 scripts/rustdesk-service-wrapper.sh $(BINDIR)/rustdesk-service-wrapper.sh
 	install -Dm644 scripts/99-uinput.rules $(LIBDIR)/rustdesk-wayland/99-uinput.rules
 	@echo ""
 	@echo "Installed. Now run the setup:"
@@ -34,6 +35,7 @@ uninstall:
 	rm -f $(LIBDIR)/libxdo_wrapper.so
 	rm -f $(BINDIR)/portal-screencast.py
 	rm -f $(BINDIR)/rustdesk-wayland.sh
+	rm -f $(BINDIR)/rustdesk-service-wrapper.sh
 	rm -rf $(LIBDIR)/rustdesk-wayland
 
 clean:

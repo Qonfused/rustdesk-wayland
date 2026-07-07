@@ -11,23 +11,28 @@
 /*
  * ld.so.preload shim for RustDesk on Wayland.
  *
- * Only activates for "rustdesk --server" processes. Does three things:
+ * Activates for RustDesk service children. Does four things:
  *
- *   1. Lies about DISPLAY — returns ":99" (our Xvfb) so RustDesk captures
+ *   1. Lies about DISPLAY — returns ":98" (our Xvfb) so RustDesk captures
  *      from the virtual display where we're rendering the PipeWire screencast.
  *
- *   2. Fixes xdo_new() — RustDesk's libxdo would connect to :99 (useless),
+ *   2. Fixes xdo_new() — RustDesk's libxdo would connect to :98 (useless),
  *      so we force it to connect to :0 (real XWayland) instead.
  *
  *   3. Hijacks XTestFakeKeyEvent() — RustDesk's keyboard input goes through
  *      XTest, which would send keystrokes to Xvfb (nowhere useful). We catch
  *      those calls and write the key events to /dev/uinput so the Wayland
  *      compositor actually sees them.
+ *
+ *   4. Moves RustDesk's helper GUI windows (--tray/--cm) to a separate hidden
+ *      Xvfb display so they do not briefly appear in the real compositor and
+ *      disturb tiling.
  */
 
 static char *(*real_getenv)(const char *name) = NULL;
 static int checked = 0;
 static int is_rustdesk_server = 0;
+static int is_rustdesk_gui_helper = 0;
 static char real_display[64] = ":0";
 
 /* xdo_t* xdo_new(const char *display) */
@@ -69,6 +74,7 @@ static void check_process(void) {
 
   int has_rustdesk = 0;
   int has_server = 0;
+  int has_gui_helper = 0;
   char *p = buf;
   char *end = buf + n;
 
@@ -78,10 +84,13 @@ static void check_process(void) {
   while (p < end) {
     if (strcmp(p, "--server") == 0)
       has_server = 1;
+    if (strcmp(p, "--tray") == 0 || strcmp(p, "--cm") == 0)
+      has_gui_helper = 1;
     p += strlen(p) + 1;
   }
 
   is_rustdesk_server = has_rustdesk && has_server;
+  is_rustdesk_gui_helper = has_rustdesk && has_gui_helper;
 }
 
 static void emit(int fd, int type, int code, int val) {
@@ -94,6 +103,20 @@ static void emit(int fd, int type, int code, int val) {
 
 static void syn(int fd) {
   emit(fd, EV_SYN, SYN_REPORT, 0);
+}
+
+static char *env_or_default(const char *name, char *fallback) {
+  char *value = real_getenv(name);
+  if (value && value[0])
+    return value;
+  return fallback;
+}
+
+static int is_display_env(const char *name) {
+  return strcmp(name, "DISPLAY") == 0 ||
+         strcmp(name, "WAYLAND_DISPLAY") == 0 ||
+         strcmp(name, "GDK_BACKEND") == 0 ||
+         strcmp(name, "XDG_SESSION_TYPE") == 0;
 }
 
 static void init_kbd(void) {
@@ -128,24 +151,43 @@ char *getenv(const char *name) {
     real_getenv = dlsym(RTLD_NEXT, "getenv");
 
   if (name) {
-    if (strcmp(name, "DISPLAY") == 0) {
+    if (is_display_env(name))
       check_process();
+
+    if (strcmp(name, "DISPLAY") == 0) {
       if (is_rustdesk_server) {
-        char *override = real_getenv("RUSTDESK_DISPLAY_OVERRIDE");
-        if (override)
-          return override;
-        return ":99";
+        return env_or_default("RUSTDESK_DISPLAY_OVERRIDE", ":98");
+      }
+      if (is_rustdesk_gui_helper) {
+        return env_or_default("RUSTDESK_GUI_DISPLAY", ":97");
       }
     }
 
-    /* We let RustDesk think it's X11 so screen capture works.
-     * Keyboard is handled below by intercepting XTestFakeKeyEvent. */
+    if (is_rustdesk_server || is_rustdesk_gui_helper) {
+      if (strcmp(name, "WAYLAND_DISPLAY") == 0)
+        return NULL;
+      if (strcmp(name, "GDK_BACKEND") == 0)
+        return "x11";
+      if (strcmp(name, "XDG_SESSION_TYPE") == 0)
+        return "x11";
+    }
+
+    /* We let RustDesk think it's X11 so screen capture works. Keyboard is
+     * handled below by intercepting XTestFakeKeyEvent. */
   }
 
   return real_getenv(name);
 }
 
-/* xdo_new() would use DISPLAY=:99 (our Xvfb), which is wrong for input.
+char *secure_getenv(const char *name) {
+  return getenv(name);
+}
+
+char *__secure_getenv(const char *name) {
+  return getenv(name);
+}
+
+/* xdo_new() would use DISPLAY=:98 (our Xvfb), which is wrong for input.
  * Point it at the real XWayland display instead. */
 void *xdo_new(const char *display) {
   if (!real_xdo_new)
@@ -160,7 +202,7 @@ void *xdo_new(const char *display) {
 }
 
 /* RustDesk sends keyboard input through XTestFakeKeyEvent (via rdev/enigo).
- * Without this, keystrokes go to Xvfb :99 and disappear.
+ * Without this, keystrokes go to Xvfb :98 and disappear.
  * We convert X11 keycodes to evdev (just subtract 8) and write to uinput. */
 int XTestFakeKeyEvent(void *display, unsigned int keycode, int is_press,
             unsigned long delay) {
