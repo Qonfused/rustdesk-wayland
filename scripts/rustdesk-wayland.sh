@@ -136,19 +136,26 @@ EOF
     start)
         echo "=== Starting RustDesk Wayland Setup ==="
 
-        # Wait for xdg-desktop-portal to be ready (up to 5 minutes)
+        # Wait for xdg-desktop-portal to be ready. The autostart supervisor
+        # retries the complete startup if the portal remains unavailable.
         echo "Waiting for xdg-desktop-portal..."
-        for i in $(seq 1 300); do
+        portal_ready=0
+        for i in $(seq 1 "${RUSTDESK_PORTAL_WAIT_SECONDS:-60}"); do
             if gdbus call --session \
                 --dest org.freedesktop.portal.Desktop \
                 --object-path /org/freedesktop/portal/desktop \
                 --method org.freedesktop.DBus.Properties.Get \
                 org.freedesktop.portal.ScreenCast version \
                 &>/dev/null; then
+                portal_ready=1
                 break
             fi
             sleep 1
         done
+        if [ "$portal_ready" -ne 1 ]; then
+            echo "ERROR: xdg-desktop-portal ScreenCast did not become ready."
+            exit 1
+        fi
 
         # Stop existing instances
         pkill -f 'rustdesk --service' 2>/dev/null || true

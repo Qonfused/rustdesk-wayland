@@ -99,6 +99,19 @@ that with `RUSTDESK_GUI_DISPLAY` only if needed.
 
 Once installed, RustDesk will automatically launch the full workaround (including screen capture) on login via `~/.config/autostart/rustdesk-service.desktop`. The autostart wrapper calls `rustdesk-wayland.sh start` in the background after a 5-second delay to let the desktop session stabilize.
 
+If the desktop portal is late during login (e.g. if startup fails or RustDesk/the screencast later exits) it cleans up and retries the complete stack. Supervisor output is written to `~/.local/state/rustdesk-wayland/supervisor.log`.
+
+The following optional environment variables control timing and logging:
+
+- `RUSTDESK_AUTOSTART_DELAY` — initial login delay (default: 5 seconds)
+- `RUSTDESK_RETRY_DELAY` — delay between restart attempts (default: 10 seconds)
+- `RUSTDESK_HEALTH_INTERVAL` — health-check interval (default: 10 seconds)
+- `RUSTDESK_PORTAL_WAIT_SECONDS` — portal readiness timeout per attempt (default: 60 seconds)
+- `RUSTDESK_SUPERVISOR_LOG_MAX_BYTES` — rotate the supervisor log at this size (default: 1 MiB)
+- `RUSTDESK_SUPERVISOR_LOG_BACKUPS` — rotated logs to retain (default: 2)
+
+The active supervisor log is size-bounded. At the default settings, rotation keeps `supervisor.log`, `supervisor.log.1`, and `supervisor.log.2`, for roughly 3 MiB of supervisor logs in total.
+
 ## Known issues
 
 - **Screen share dialog:** The first time you run `start` after install, you'll get a COSMIC screen share consent dialog. Click "Share" to proceed. The permission is saved in `~/.local/share/rustdesk-wayland/restore_token` and reused on subsequent runs — no more dialogs (unless the token expires or is revoked).
