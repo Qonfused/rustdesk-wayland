@@ -66,9 +66,13 @@ def launch_gstreamer(nid):
     display = os.environ.get('DISPLAY', ':99')
     cmd = [
         'gst-launch-1.0',
-        f'pipewiresrc', f'path={nid}', '!',
+        'pipewiresrc', f'path={nid}',
+        'always-copy=true', 'do-timestamp=true', 'keepalive-time=100',
+        'on-disconnect=error', '!',
+        'queue', 'max-size-buffers=2', 'max-size-bytes=0',
+        'max-size-time=0', 'leaky=downstream', '!',
         'videoconvert', '!',
-        f'ximagesink', 'sync=false',
+        'ximagesink', 'sync=false', 'enable-last-sample=false',
     ]
     print(f"Launching GStreamer on DISPLAY={display}: {' '.join(cmd)}", file=sys.stderr)
     gst_proc = subprocess.Popen(cmd, env={**os.environ, 'DISPLAY': display})
